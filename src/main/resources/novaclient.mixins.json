@@ -1,0 +1,16 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "dev.nova.client.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "EntityMixin",
+    "GameRendererMixin",
+    "ItemInHandRendererMixin",
+    "MinecraftMixin",
+    "OptionInstanceMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

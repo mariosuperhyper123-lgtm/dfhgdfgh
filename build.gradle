@@ -1,0 +1,72 @@
+plugins {
+    id 'net.fabricmc.fabric-loom' version '1.17-SNAPSHOT'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+}
+
+processResources {
+    inputs.property "version", project.version
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 25
+    it.options.encoding = 'UTF-8'
+}
+
+// Diagnose: schreibt die Methoden wichtiger Minecraft-Klassen in build/libs/nova-api-dump.txt,
+// damit sich Mixins exakt auf die installierte Minecraft-Version abstimmen lassen.
+tasks.register('dumpApi') {
+    dependsOn 'compileJava'
+    doLast {
+        def out = layout.buildDirectory.file('libs/nova-api-dump.txt').get().asFile
+        out.parentFile.mkdirs()
+        out.text = ''
+        try {
+            def cp = sourceSets.main.compileClasspath.asPath
+            def javap = "${System.getProperty('java.home')}/bin/javap"
+            def withCode = ['net.minecraft.client.Camera', 'net.minecraft.client.MouseHandler']
+            def plain = ['net.minecraft.client.Minecraft', 'net.minecraft.world.entity.Entity',
+                         'net.minecraft.client.renderer.GameRenderer', 'net.minecraft.client.renderer.ItemInHandRenderer',
+                         'net.minecraft.client.renderer.LevelRenderer', 'net.minecraft.client.OptionInstance',
+                         'net.minecraft.client.gui.Gui']
+            (withCode + plain).each { c ->
+                def args = [javap, '-p'] + (withCode.contains(c) ? ['-c'] : []) + ['-cp', cp, c]
+                def proc = args.execute()
+                def text = proc.text
+                out << "==== ${c}\n" << text << proc.err.text << "\n"
+            }
+            // Alle Klassennamen mit Kamera/Culling-Bezug
+            def names = new TreeSet<String>()
+            sourceSets.main.compileClasspath.files.findAll { it.name.endsWith('.jar') && it.name.contains('minecraft') }.each { jar ->
+                new java.util.zip.ZipFile(jar).withCloseable { zip ->
+                    zip.entries().each { e ->
+                        if (e.name.endsWith('.class') && (e.name =~ /(?i)(camera|cull|occlusion)/)) names << e.name
+                    }
+                }
+            }
+            out << "==== Klassen (camera/cull/occlusion)\n" << names.join('\n') << "\n"
+        } catch (Throwable t) {
+            out << "Dump fehlgeschlagen: ${t}\n"
+        }
+    }
+}
+tasks.named('build') { finalizedBy 'dumpApi' }
