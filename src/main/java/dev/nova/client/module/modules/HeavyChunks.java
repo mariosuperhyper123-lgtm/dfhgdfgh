@@ -12,12 +12,12 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.AABB;
 import org.lwjgl.glfw.GLFW;
@@ -100,8 +100,8 @@ public class HeavyChunks extends Module {
     }
 
     /** Schnappschuss auf dem Haupt-Thread – nur Typen und Höhen, keine Referenzen auf Weltobjekte. */
-    private record Snapshot(int gen, int chunkX, int chunkZ, List<BlockEntityType<?>> beTypes, int[] beYs,
-                            List<EntityType<?>> entityTypes, double[] entityYs, int worldMinY, int worldMaxY) {}
+    private record Snapshot(int gen, int chunkX, int chunkZ, List<String> beTypes, int[] beYs,
+                            List<String> entityTypes, double[] entityYs, int worldMinY, int worldMaxY) {}
 
     private record Thresholds(int be, int chests, int hoppers, int shulkers, int furnaces, int spawners,
                               int barrels, int entities) {}
@@ -240,24 +240,32 @@ public class HeavyChunks extends Module {
                 minFurnaces.getInt(), minSpawners.getInt(), minBarrels.getInt(), minEntities.getInt());
     }
 
+    /** Registry-ID ohne Namespace, z. B. "item" oder "chest". Seit 26.x gibt es die Konstanten wie EntityType.ITEM nicht mehr. */
+    private static String entityId(EntityType<?> t) {
+        return BuiltInRegistries.ENTITY_TYPE.getKey(t).getPath();
+    }
+
     private static boolean isCounted(EntityType<?> t) {
-        return t == EntityType.ITEM || t == EntityType.ARMOR_STAND
-                || t == EntityType.ITEM_FRAME || t == EntityType.GLOW_ITEM_FRAME;
+        return switch (entityId(t)) {
+            case "item", "armor_stand", "item_frame", "glow_item_frame" -> true;
+            default -> false;
+        };
     }
 
     private static Snapshot snapshot(int gen, LevelChunk chunk, int cx, int cz, List<Entity> entities) {
         List<BlockEntity> bes = new ArrayList<>(chunk.getBlockEntities().values());
-        List<BlockEntityType<?>> types = new ArrayList<>(bes.size());
+        List<String> types = new ArrayList<>(bes.size());
         int[] ys = new int[bes.size()];
         for (int i = 0; i < bes.size(); i++) {
             BlockEntity be = bes.get(i);
-            types.add(be.getType());
+            var id = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType());
+            types.add(id == null ? "" : id.getPath());
             ys[i] = be.getBlockPos().getY();
         }
-        List<EntityType<?>> eTypes = new ArrayList<>(entities.size());
+        List<String> eTypes = new ArrayList<>(entities.size());
         double[] eYs = new double[entities.size()];
         for (int i = 0; i < entities.size(); i++) {
-            eTypes.add(entities.get(i).getType());
+            eTypes.add(entityId(entities.get(i).getType()));
             eYs[i] = entities.get(i).getY();
         }
         int sections = chunk.getSections().length;
@@ -273,16 +281,17 @@ public class HeavyChunks extends Module {
         double minY = Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
 
         for (int i = 0; i < s.beTypes().size(); i++) {
-            BlockEntityType<?> t = s.beTypes().get(i);
             // entspricht ChestBlockEntity, ShulkerBoxBlockEntity, HopperBlockEntity,
             // (Abstract)FurnaceBlockEntity, SpawnerBlockEntity, BarrelBlockEntity
-            if (t == BlockEntityType.CHEST || t == BlockEntityType.TRAPPED_CHEST) chests++;
-            else if (t == BlockEntityType.SHULKER_BOX) shulkers++;
-            else if (t == BlockEntityType.HOPPER) hoppers++;
-            else if (t == BlockEntityType.FURNACE || t == BlockEntityType.BLAST_FURNACE || t == BlockEntityType.SMOKER) furnaces++;
-            else if (t == BlockEntityType.MOB_SPAWNER) spawners++;
-            else if (t == BlockEntityType.BARREL) barrels++;
-            else continue;
+            switch (s.beTypes().get(i)) {
+                case "chest", "trapped_chest" -> chests++;
+                case "shulker_box" -> shulkers++;
+                case "hopper" -> hoppers++;
+                case "furnace", "blast_furnace", "smoker" -> furnaces++;
+                case "mob_spawner" -> spawners++;
+                case "barrel" -> barrels++;
+                default -> { continue; }
+            }
             total++;
             minY = Math.min(minY, s.beYs()[i]);
             maxY = Math.max(maxY, s.beYs()[i] + 1);
@@ -290,10 +299,11 @@ public class HeavyChunks extends Module {
 
         int items = 0, stands = 0, frames = 0;
         for (int i = 0; i < s.entityTypes().size(); i++) {
-            EntityType<?> t = s.entityTypes().get(i);
-            if (t == EntityType.ITEM) items++;
-            else if (t == EntityType.ARMOR_STAND) stands++;
-            else frames++;
+            switch (s.entityTypes().get(i)) {
+                case "item" -> items++;
+                case "armor_stand" -> stands++;
+                default -> frames++;
+            }
             minY = Math.min(minY, s.entityYs()[i]);
             maxY = Math.max(maxY, s.entityYs()[i] + 1);
         }
